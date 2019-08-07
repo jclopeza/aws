@@ -1,4 +1,0 @@
-# This will configure a default manager-gui and admin-gui user:
-
-admin_username: admin
-admin_password: password

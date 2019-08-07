@@ -12,38 +12,13 @@ resource "aws_vpc" "vpc" {
 }
 
 # Creación de las subredes
-resource "aws_subnet" "private-1" {
+# En las subredes que serán públicas, habilitamos la asignación automática de IP pública
+resource "aws_subnet" "public" {
   vpc_id     = "${aws_vpc.vpc.id}"
   cidr_block = "192.168.1.0/24"
   availability_zone = "${data.aws_availability_zones.available.names[0]}"
   tags = {
-    Name = "${var.project_name}-${var.environment}-private-1"
-  }
-}
-resource "aws_subnet" "private-2" {
-  vpc_id     = "${aws_vpc.vpc.id}"
-  cidr_block = "192.168.2.0/24"
-  availability_zone = "${data.aws_availability_zones.available.names[1]}"
-  tags = {
-    Name = "${var.project_name}-${var.environment}-private-2"
-  }
-}
-# En las subredes que serán públicas, habilitamos la asignación automática de IP pública
-resource "aws_subnet" "public-1" {
-  vpc_id     = "${aws_vpc.vpc.id}"
-  cidr_block = "192.168.3.0/24"
-  availability_zone = "${data.aws_availability_zones.available.names[2]}"
-  tags = {
-    Name = "${var.project_name}-${var.environment}-public-1"
-  }
-  map_public_ip_on_launch = true
-}
-resource "aws_subnet" "public-2" {
-  vpc_id     = "${aws_vpc.vpc.id}"
-  cidr_block = "192.168.4.0/24"
-  availability_zone = "${data.aws_availability_zones.available.names[3]}"
-  tags = {
-    Name = "${var.project_name}-${var.environment}-public-2"
+    Name = "${var.project_name}-${var.environment}-public"
   }
   map_public_ip_on_launch = true
 }
@@ -57,13 +32,7 @@ resource "aws_internet_gateway" "igw" {
 }
 
 # Creación de las tablas de rutas. Por defecto se crea y se asocia una a la VPC
-# que ya hemos creado. Pero creamos dos nuevas. A una de ellas le damos salida a internet
-resource "aws_route_table" "private" {
-  vpc_id = "${aws_vpc.vpc.id}"
-  tags = {
-    Name = "${var.project_name}-${var.environment}-private"
-  }
-}
+# que ya hemos creado. Pero creamos una nueva para darle salida a internet
 resource "aws_route_table" "public" {
   vpc_id = "${aws_vpc.vpc.id}"
   route {
@@ -76,20 +45,8 @@ resource "aws_route_table" "public" {
 }
 
 # Asociamos las subredes a las tablas de rutas
-resource "aws_route_table_association" "private-1-private" {
-  subnet_id      = "${aws_subnet.private-1.id}"
-  route_table_id = "${aws_route_table.private.id}"
-}
-resource "aws_route_table_association" "private-2-private" {
-  subnet_id      = "${aws_subnet.private-2.id}"
-  route_table_id = "${aws_route_table.private.id}"
-}
-resource "aws_route_table_association" "public-1-public" {
-  subnet_id      = "${aws_subnet.public-1.id}"
-  route_table_id = "${aws_route_table.public.id}"
-}
-resource "aws_route_table_association" "public-2-public" {
-  subnet_id      = "${aws_subnet.public-2.id}"
+resource "aws_route_table_association" "public-public" {
+  subnet_id      = "${aws_subnet.public.id}"
   route_table_id = "${aws_route_table.public.id}"
 }
 
@@ -99,9 +56,9 @@ resource "aws_security_group" "allow_8080" {
   name        = "allow_8080"
   description = "Allow 8080 inbound traffic"
   ingress {
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
+    from_port       = 8080
+    to_port         = 8080
+    protocol        = "tcp"
     cidr_blocks     = ["0.0.0.0/0"]
   }
   egress {
@@ -166,7 +123,7 @@ resource "aws_instance" "front" {
   ami = "${data.aws_ami.ubuntu.id}"
   instance_type = "${var.instance_type}"
   key_name = "${aws_key_pair.akp.id}"
-  subnet_id = "${aws_subnet.public-1.id}"
+  subnet_id = "${aws_subnet.public.id}"
   vpc_security_group_ids = [
       "${aws_security_group.allow_22.id}",
       "${aws_security_group.allow_8080.id}"
@@ -174,45 +131,17 @@ resource "aws_instance" "front" {
   tags = {
     Name = "${var.project_name}-${var.environment}-front"
   }
-  connection {
-    host        = "${self.public_ip}"
-    type        = "ssh"
-    user        = "ubuntu"
-    private_key = "${file(var.private_key_path)}"
-  }
-  provisioner "remote-exec" {
-    inline = [
-        "sudo apt-get update"
-    ]
-  }
-  provisioner "local-exec" {
-    command = "ansible-playbook -u ubuntu -i '${self.public_ip},' --private-key ${var.private_key_path} playbook-tomcat8.yml --ssh-common-args='-o StrictHostKeyChecking=no'"
-  }
 }
-resource "aws_instance" "webservice" {
+resource "aws_instance" "bdd" {
   ami = "${data.aws_ami.ubuntu.id}"
   instance_type = "${var.instance_type}"
   key_name = "${aws_key_pair.akp.id}"
-  subnet_id = "${aws_subnet.public-2.id}"
+  subnet_id = "${aws_subnet.public.id}"
   vpc_security_group_ids = [
       "${aws_security_group.allow_22.id}",
-      "${aws_security_group.allow_8080.id}"
+      "${aws_security_group.allow_3306.id}"
     ]
   tags = {
-    Name = "${var.project_name}-${var.environment}-webservice"
-  }
-  connection {
-    host        = "${self.public_ip}"
-    type        = "ssh"
-    user        = "ubuntu"
-    private_key = "${file(var.private_key_path)}"
-  }
-  provisioner "remote-exec" {
-    inline = [
-        "sudo apt-get update"
-    ]
-  }
-  provisioner "local-exec" {
-    command = "ansible-playbook -u ubuntu -i '${self.public_ip},' --private-key ${var.private_key_path} playbook-axis2.yml --ssh-common-args='-o StrictHostKeyChecking=no'"
+    Name = "${var.project_name}-${var.environment}-bdd"
   }
 }
