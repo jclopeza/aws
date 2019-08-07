@@ -3,10 +3,72 @@
 ## Creación de una VPC
 Creamos una red de nombre `calculator-dev` con un CIDR block igual a 192.168.0.0/16. Nos devuelve un id = vpc-0297b2ffe5d8d1af9
 
+### Código Terraform
+```
+# Indicamos el provider y los datos de acceso
+provider "aws" {
+  region = "${var.aws_region}"
+}
+
+# Creamos una VPC, el nombre debe estar parametrizado porque necesitaremos varias VPC
+resource "aws_vpc" "vpc" {
+  cidr_block = "192.168.0.0/16"
+  tags = {
+    Name = "${var.project_name}-${var.environment}"
+  }
+}
+```
+
 ## Creación de subredes dentro de la VPC
 Se recomienda que cada subred esté en una zona de disponibilidad distinta. Creamos una subred de nombre `calculator-dev-private-1`, seleccionamos la zona de disponibilidad `us-east-1a` y el CIDR Block = 192.168.1.0/24. Nos devuelve el id = subnet-01690afd5d9a96e6e. Creamos tres subredes más, una privada y otras dos más públicas, todas en zonas de disponibilidad distintas.
 
 En la subred pública, habilitar la autoasignación de IP públicas. De esta forma todas las máquinas que levantemos en esa subred tendrá una IP pública.
+
+### Código Terraform
+Necesitamos un fichero `data.tf` que nos recupere todas las zonas de disponibilidad existentes. El contenido será el siguiente:
+```
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+```
+En el fichero main.tf incluimos lo siguiente:
+```
+resource "aws_subnet" "private-1" {
+  vpc_id     = "${aws_vpc.vpc.id}"
+  cidr_block = "192.168.1.0/24"
+  availability_zone = "${data.aws_availability_zones.available.names[0]}"
+  tags = {
+    Name = "${var.project_name}-${var.environment}-private-1"
+  }
+}
+resource "aws_subnet" "private-2" {
+  vpc_id     = "${aws_vpc.vpc.id}"
+  cidr_block = "192.168.2.0/24"
+  availability_zone = "${data.aws_availability_zones.available.names[1]}"
+  tags = {
+    Name = "${var.project_name}-${var.environment}-private-2"
+  }
+}
+# En las subredes que serán públicas, habilitamos la asignación automática de IP pública
+resource "aws_subnet" "public-1" {
+  vpc_id     = "${aws_vpc.vpc.id}"
+  cidr_block = "192.168.3.0/24"
+  availability_zone = "${data.aws_availability_zones.available.names[2]}"
+  tags = {
+    Name = "${var.project_name}-${var.environment}-public-1"
+  }
+  map_public_ip_on_launch = true
+}
+resource "aws_subnet" "public-2" {
+  vpc_id     = "${aws_vpc.vpc.id}"
+  cidr_block = "192.168.4.0/24"
+  availability_zone = "${data.aws_availability_zones.available.names[3]}"
+  tags = {
+    Name = "${var.project_name}-${var.environment}-public-2"
+  }
+  map_public_ip_on_launch = true
+}
+```
 
 ## Internet Gateway
 Cada VPC necesita un internet gateway para poder salir a internet. Creamos uno de nombre `calculator-dev`. Lo asociamos a nuestra VPC y esto permitirá a la VPC salir a internet. Cada VPC sólo puede atachado un Internet Gateway.
