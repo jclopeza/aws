@@ -3,85 +3,13 @@
 ## Creación de una VPC
 Creamos una red de nombre `calculator-dev` con un CIDR block igual a 192.168.0.0/16. Nos devuelve un id = vpc-0297b2ffe5d8d1af9
 
-### Código Terraform
-```
-# Indicamos el provider y los datos de acceso
-provider "aws" {
-  region = "${var.aws_region}"
-}
-
-# Creamos una VPC, el nombre debe estar parametrizado porque necesitaremos varias VPC
-resource "aws_vpc" "vpc" {
-  cidr_block = "192.168.0.0/16"
-  tags = {
-    Name = "${var.project_name}-${var.environment}"
-  }
-}
-```
-
 ## Creación de subredes dentro de la VPC
 Se recomienda que cada subred esté en una zona de disponibilidad distinta. Creamos una subred de nombre `calculator-dev-private-1`, seleccionamos la zona de disponibilidad `us-east-1a` y el CIDR Block = 192.168.1.0/24. Nos devuelve el id = subnet-01690afd5d9a96e6e. Creamos tres subredes más, una privada y otras dos más públicas, todas en zonas de disponibilidad distintas.
 
 En la subred pública, habilitar la autoasignación de IP públicas. De esta forma todas las máquinas que levantemos en esa subred tendrá una IP pública.
 
-### Código Terraform
-Necesitamos un fichero `data.tf` que nos recupere todas las zonas de disponibilidad existentes. El contenido será el siguiente:
-```
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-```
-En el fichero main.tf incluimos lo siguiente:
-```
-resource "aws_subnet" "private-1" {
-  vpc_id     = "${aws_vpc.vpc.id}"
-  cidr_block = "192.168.1.0/24"
-  availability_zone = "${data.aws_availability_zones.available.names[0]}"
-  tags = {
-    Name = "${var.project_name}-${var.environment}-private-1"
-  }
-}
-resource "aws_subnet" "private-2" {
-  vpc_id     = "${aws_vpc.vpc.id}"
-  cidr_block = "192.168.2.0/24"
-  availability_zone = "${data.aws_availability_zones.available.names[1]}"
-  tags = {
-    Name = "${var.project_name}-${var.environment}-private-2"
-  }
-}
-# En las subredes que serán públicas, habilitamos la asignación automática de IP pública
-resource "aws_subnet" "public-1" {
-  vpc_id     = "${aws_vpc.vpc.id}"
-  cidr_block = "192.168.3.0/24"
-  availability_zone = "${data.aws_availability_zones.available.names[2]}"
-  tags = {
-    Name = "${var.project_name}-${var.environment}-public-1"
-  }
-  map_public_ip_on_launch = true
-}
-resource "aws_subnet" "public-2" {
-  vpc_id     = "${aws_vpc.vpc.id}"
-  cidr_block = "192.168.4.0/24"
-  availability_zone = "${data.aws_availability_zones.available.names[3]}"
-  tags = {
-    Name = "${var.project_name}-${var.environment}-public-2"
-  }
-  map_public_ip_on_launch = true
-}
-```
-
 ## Internet Gateway
 Cada VPC necesita un internet gateway para poder salir a internet. Creamos uno de nombre `calculator-dev`. Lo asociamos a nuestra VPC y esto permitirá a la VPC salir a internet. Cada VPC sólo puede atachado un Internet Gateway.
-
-### Código Terraform
-```
-resource "aws_internet_gateway" "igw" {
-  vpc_id = "${aws_vpc.vpc.id}"
-  tags = {
-    Name = "${var.project_name}-${var.environment}-igw"
-  }
-}
-```
 
 ## Tablas de rutas de la VPC
 Cada VPC tiene sus propias tablas de rutas. Podemos verlo si vamos a `Route Tables`. Y estas tablas de rutas se pueden asociar a subnets. Por ejemplo, podemos decir en una tabla de rutas cómo salir a internet, pero si luego esa tabla de rutas no la asociamos a una subnet, esa subnet no podrá salir a internet.
@@ -95,51 +23,8 @@ Por defecto, todas las máquinas que levantemos en subnets, se pueden ver entre 
 
 De esta forma, las subnets que tengan asociada la tabla de rutas `calculator-dev-public` tendrán salida a internet, y las subnets que tengan asociada la tabla de rutas `calculator-dev-private` no tendrán salida a internet.
 
-### Código Terraform
-```
-# Creación de las tablas de rutas. Por defecto se crea y se asocia una a la VPC
-# que ya hemos creado. Pero creamos dos nuevas. A una de ellas le damos salida a internet
-resource "aws_route_table" "private" {
-  vpc_id = "${aws_vpc.vpc.id}"
-  tags = {
-    Name = "${var.project_name}-${var.environment}-private"
-  }
-}
-resource "aws_route_table" "public" {
-  vpc_id = "${aws_vpc.vpc.id}"
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = "${aws_internet_gateway.igw.id}"
-  }
-  tags = {
-    Name = "${var.project_name}-${var.environment}-public"
-  }
-}
-```
-
 ## Asociación de tablas de rutas a subredes
 Editamos las 4 subredes y a cada una le asociamos su tabla de rutas correspondiente.
-
-### Código Terraform
-```
-# Asociamos las subredes a las tablas de rutas
-resource "aws_route_table_association" "private-1-private" {
-  subnet_id      = "${aws_subnet.private-1.id}"
-  route_table_id = "${aws_route_table.private.id}"
-}
-resource "aws_route_table_association" "private-2-private" {
-  subnet_id      = "${aws_subnet.private-2.id}"
-  route_table_id = "${aws_route_table.private.id}"
-}
-resource "aws_route_table_association" "public-1-public" {
-  subnet_id      = "${aws_subnet.public-1.id}"
-  route_table_id = "${aws_route_table.public.id}"
-}
-resource "aws_route_table_association" "public-2-public" {
-  subnet_id      = "${aws_subnet.public-2.id}"
-  route_table_id = "${aws_route_table.public.id}"
-}
-```
 
 ## Network ACL
 Sería una capa extra de seguridad para nuestra VPC y nuestras subredes. Aquí podemos definir rutas de entrada y rutas de salida.
@@ -149,7 +34,6 @@ La principal diferencia entre un Security Group y una Network ACL es que el Secu
 Ejemplo, podemos permitir el acceso a una subred sólamente por el puerto 3306 de MySQL. También hay que tener en cuenta que tenemos que permitir el acceso explícito a todos los puertos externos a los que queramos acceder desde una subred.
 
 ## Creación de security groups para las instancias que vayamos a crear
-
 
 ## Creamos instancias EC2
 Y asociamos a una la subred pública y a otra la subred privada. Asociamos el mismo security group, pero para acceder a la instancia que está dentro de la red privada, tendremos que hacer un salto.
